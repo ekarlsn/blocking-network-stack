@@ -16,7 +16,7 @@ use smoltcp::wire::DnsQueryType;
 #[cfg(feature = "udp")]
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{
-    iface::{Interface, SocketHandle, SocketSet},
+    iface::{Interface, PollResult, SocketHandle, SocketSet},
     time::Instant,
     wire::{IpAddress, IpCidr, Ipv4Address},
 };
@@ -246,13 +246,13 @@ impl<'a, D: smoltcp::phy::Device> Stack<'a, D> {
                     smoltcp::socket::dhcpv4::Event::Configured(config) => {
                         let dns = config.dns_servers.first();
                         *self.ip_info.borrow_mut() = Some(ipv4::IpInfo {
-                            ip: config.address.address().0.into(),
+                            ip: config.address.address().into(),
                             subnet: ipv4::Subnet {
-                                gateway: unwrap!(config.router).0.into(),
+                                gateway: unwrap!(config.router).into(),
                                 mask: ipv4::Mask(config.address.prefix_len()),
                             },
-                            dns: dns.map(|x| x.0.into()),
-                            secondary_dns: config.dns_servers.get(1).map(|x| x.0.into()),
+                            dns: dns.map(|x| (*x).into()),
+                            secondary_dns: config.dns_servers.get(1).map(|x| (*x).into()),
                         });
 
                         let address = config.address;
@@ -423,7 +423,7 @@ impl<'a, D: smoltcp::phy::Device> Stack<'a, D> {
     /// Make sure to regularly call this function.
     pub fn work(&self) {
         loop {
-            let did_work = self.with_mut(|interface, device, sockets| {
+            let poll_result = self.with_mut(|interface, device, sockets| {
                 let network_config = self.network_config.borrow().clone();
                 if let ipv4::Configuration::Client(ipv4::ClientConfiguration::DHCP(_)) =
                     network_config
@@ -434,9 +434,9 @@ impl<'a, D: smoltcp::phy::Device> Stack<'a, D> {
                     settings,
                 )) = network_config
                 {
-                    let addr = Ipv4Address::from_bytes(&settings.ip.octets());
+                    let addr = Ipv4Address::from(settings.ip.octets());
                     if !interface.has_ip_addr(addr) {
-                        let gateway = Ipv4Address::from_bytes(&settings.subnet.gateway.octets());
+                        let gateway = Ipv4Address::from(settings.subnet.gateway.octets());
                         interface.routes_mut().add_default_ipv4_route(gateway).ok();
                         interface.update_ip_addrs(|addrs| {
                             unwrap!(addrs.push(IpCidr::new(addr.into(), settings.subnet.mask.0)));
@@ -450,7 +450,7 @@ impl<'a, D: smoltcp::phy::Device> Stack<'a, D> {
                 )
             });
 
-            if !did_work {
+            if poll_result == PollResult::None {
                 break;
             }
         }
@@ -690,7 +690,7 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> Drop for Socket<'s, 'n, D> {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum IoError {
     SocketClosed,
-    #[cfg(feature = "igmp")]
+    #[cfg(feature = "multicast")]
     MultiCastError(smoltcp::iface::MulticastError),
     #[cfg(feature = "tcp")]
     TcpRecvError,
@@ -810,7 +810,7 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> embedded_io::Write for Socket<'s, 'n, 
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         loop {
-            let res = self.network.with_mut(|interface, device, sockets| {
+            let poll_result = self.network.with_mut(|interface, device, sockets| {
                 interface.poll(
                     Instant::from_millis((self.network.current_millis_fn)() as i64),
                     device,
@@ -818,7 +818,7 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> embedded_io::Write for Socket<'s, 'n, 
                 )
             });
 
-            if !res {
+            if poll_result == PollResult::None {
                 break;
             }
         }
@@ -960,17 +960,13 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> UdpSocket<'s, 'n, D> {
     }
 
     /// This function specifies a new multicast group for this socket to join
-    #[cfg(feature = "igmp")]
-    pub fn join_multicast_group(&mut self, addr: IpAddress) -> Result<bool, IoError> {
+    #[cfg(feature = "multicast")]
+    pub fn join_multicast_group(&mut self, addr: IpAddress) -> Result<(), IoError> {
         self.work();
 
-        let res = self.network.with_mut(|interface, device, _| {
-            interface.join_multicast_group(
-                device,
-                addr,
-                Instant::from_millis((self.network.current_millis_fn)() as i64),
-            )
-        });
+        let res = self
+            .network
+            .with_mut(|interface, _, _| interface.join_multicast_group(addr));
 
         self.work();
 

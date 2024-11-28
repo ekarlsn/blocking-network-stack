@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-smoltcp = { version = "0.11.0", default-features = false, features = [
+smoltcp = { version = "0.12.0", default-features = false, features = [
   "medium-ethernet",
   "socket-raw",
-]}
+] }
 
 heapless = { version = "0.8.0", default-features = false, features = [
   "portable-atomic",
@@ -15,14 +15,16 @@ heapless = { version = "0.8.0", default-features = false, features = [
 
 embedded-io = { version = "0.6.1", default-features = false }
 
-defmt = { version = "0.3.8", optional = true }
+defmt = { version = "0.3.9", optional = true }
 log = { version = "0.4.22", optional = true }
-serde = { version = "1.0.210", default-features = false, features = ["derive"], optional = true }
+serde = { version = "1.0.215", default-features = false, features = [
+  "derive",
+], optional = true }
 
 
 [features]
 # todo remove log
-default = ["ipv4", "tcp", "udp", "icmp", "igmp", "dns", "dhcpv4", "log"]
+default = ["dhcpv4", "dns", "icmp", "ipv4", "log", "multicast", "tcp", "udp"]
 
 ## IPv6 support. Includes utils feature
 ipv6 = ["smoltcp/proto-ipv6"]
@@ -39,11 +41,8 @@ udp = ["ipv4", "smoltcp/socket-udp"]
 ## ICMP socket support. Includes ipv4 feature
 icmp = ["ipv4", "smoltcp/socket-icmp"]
 
-## IGMP (multicast) support. Includes ipv4 featu
-igmp = ["ipv4", "smoltcp/proto-igmp"]
-
 ## DNS support. Includes udp feature
-dns = ["udp", "smoltcp/proto-dns", "smoltcp/socket-dns"]
+dns = ["smoltcp/proto-dns", "smoltcp/socket-dns", "udp"]
 
 ## DHCPv4 support, both creating sockets and autoconfiguring network settings. Includes utils feature
 dhcpv4 = ["smoltcp/proto-dhcpv4", "smoltcp/socket-dhcpv4"]
@@ -53,6 +52,9 @@ defmt = ["dep:defmt", "smoltcp/defmt"]
 
 ## Enable support for the `log` crate
 log = ["dep:log", "smoltcp/log"]
+
+## Multicast support.
+multicast = ["smoltcp/multicast"]
 
 # Implement serde Serialize / Deserialize
 serde = ["dep:serde", "heapless/serde"]
