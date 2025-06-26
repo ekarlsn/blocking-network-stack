@@ -557,7 +557,12 @@ pub struct Socket<'s, 'n: 's, D: smoltcp::phy::Device> {
 #[cfg(feature = "tcp")]
 impl<'s, 'n: 's, D: smoltcp::phy::Device> Socket<'s, 'n, D> {
     /// Connect the socket
-    pub fn open<'i>(&'i mut self, addr: IpAddress, port: u16) -> Result<(), IoError>
+    pub fn open<'i>(
+        &'i mut self,
+        addr: IpAddress,
+        port: u16,
+        timeout: Option<smoltcp::time::Duration>,
+    ) -> Result<(), IoError>
     where
         's: 'i,
     {
@@ -573,6 +578,12 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> Socket<'s, 'n, D> {
             res.map_err(IoError::ConnectError)?;
         }
 
+        let deadline = timeout.map(|timeout| {
+            let current_millis = self.network.current_millis_fn;
+            let now = smoltcp::time::Instant::from_millis((current_millis)() as i64);
+            now + timeout
+        });
+
         loop {
             let can_send = self.network.with_mut(|_interface, _device, sockets| {
                 let sock = sockets.get_mut::<TcpSocket>(self.socket_handle);
@@ -584,6 +595,14 @@ impl<'s, 'n: 's, D: smoltcp::phy::Device> Socket<'s, 'n, D> {
             }
 
             self.work();
+
+            if let Some(deadline) = deadline {
+                let current_millis = self.network.current_millis_fn;
+                let now = smoltcp::time::Instant::from_millis((current_millis)() as i64);
+                if deadline < now {
+                    return Err(IoError::Timeout);
+                }
+            }
         }
 
         Ok(())
@@ -706,6 +725,8 @@ pub enum IoError {
     BindError(smoltcp::socket::udp::BindError),
     #[cfg(feature = "tcp")]
     ListenError(smoltcp::socket::tcp::ListenError),
+    #[cfg(feature = "tcp")]
+    Timeout,
 }
 
 impl embedded_io::Error for IoError {
